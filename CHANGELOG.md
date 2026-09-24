@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 - Added `Paint::with_interpolation_space`/`set_interpolation_space` and
   `ColorSpace` (`Srgb`, `LinearRgb`, `Oklab`, `Oklch`, `Hsl`), letting a
   gradient's stop colors be interpolated in a space other than plain sRGB.
+- Gradient stops with a non-finite offset or color are now ignored.
 - Added `LayerEffects::with_blend`: a layer composited with a `BlendMode`, CSS
   `mix-blend-mode` and SVG's on a group. The finished layer, at its opacity,
   is blended with what lies under it on the target it was opened on, which
