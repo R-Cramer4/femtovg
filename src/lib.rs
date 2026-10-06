@@ -613,6 +613,70 @@ where
         self.verts.extend_from_slice(&verts);
     }
 
+    /// Copies the `width` x `height` rect at (`x`, `y`) of the current render
+    /// target, in device pixels, into `image` at (`dst_x`, `dst_y`).
+    ///
+    /// The pixels land where a draw of the same rect into `image` would put
+    /// them, so an image created with [`ImageFlags::FLIP_Y`] reads them
+    /// upright, as it reads anything rendered into it. Like
+    /// [`clear_rect`](Self::clear_rect), this is a raw copy: the transform,
+    /// scissor, clip and composite operation don't apply, and the copied
+    /// pixels replace what `image` held. The part of the rect beyond the
+    /// render target or `image` is skipped.
+    ///
+    /// An image created with [`ImageFlags::GENERATE_MIPMAPS`] keeps its old
+    /// mip levels, and an image wrapping an external texture is skipped.
+    ///
+    /// Copying from the screen needs the backend to read it back:
+    /// - WGPU: the output texture needs `wgpu::TextureUsages::COPY_SRC`, a
+    ///   single array layer and mip level, and a size equal to the output's;
+    ///   otherwise the copy is skipped with a warning.
+    /// - OpenGL: the framebuffer must be single-sampled, or the copy fails
+    ///   with a GL error.
+    /// - OpenGL ES: the default framebuffer needs an alpha channel, since ES
+    ///   doesn't copy into a format with components its source lacks.
+    ///
+    /// Returns [`ErrorKind::ImageIdNotFound`] for an unknown or deleted
+    /// image, and [`ErrorKind::UnsupportedOperation`] when `image` isn't a
+    /// [`PixelFormat::Rgba8`] image or is the current render target, and
+    /// while a [`begin_layer`](Self::begin_layer) capture is open: the target
+    /// is then the layer's store, not the backdrop.
+    #[allow(clippy::too_many_arguments)]
+    pub fn copy_render_target(
+        &mut self,
+        x: u32,
+        y: u32,
+        width: u32,
+        height: u32,
+        image: ImageId,
+        dst_x: u32,
+        dst_y: u32,
+    ) -> Result<(), ErrorKind> {
+        let info = self.image_info(image)?;
+        if info.format() != PixelFormat::Rgba8
+            || self.layers.iter().any(|layer| layer.image.is_some())
+            || self.current_render_target == RenderTarget::Image(image)
+        {
+            return Err(ErrorKind::UnsupportedOperation);
+        }
+        let (target_width, target_height) = self.render_target_size();
+        let width = width
+            .min((target_width as u32).saturating_sub(x))
+            .min((info.width() as u32).saturating_sub(dst_x));
+        let height = height
+            .min((target_height as u32).saturating_sub(y))
+            .min((info.height() as u32).saturating_sub(dst_y));
+        if width == 0 || height == 0 {
+            return Ok(());
+        }
+        self.append_cmd(Command::new(CommandType::CopyRenderTarget {
+            target_image: image,
+            src: [x, y, width, height],
+            dst: [dst_x, dst_y],
+        }));
+        Ok(())
+    }
+
     /// Returns the width of the current render target.
     pub fn width(&self) -> u32 {
         match self.current_render_target {
@@ -808,7 +872,7 @@ where
         let mut cmd = cmd;
         // Stencil bookkeeping commands and target switches carry no fragments
         // to gate; clear_rect is a raw clear that neither backend clips; a
-        // filter pass draws into its own target image, not the clipped one.
+        // filter pass or a copy writes its own target image, not the clipped one.
         if !matches!(
             cmd.cmd_type,
             CommandType::ClipFill
@@ -816,6 +880,7 @@ where
                 | CommandType::SetRenderTarget(_)
                 | CommandType::ClearRect { .. }
                 | CommandType::RenderFilteredImage { .. }
+                | CommandType::CopyRenderTarget { .. }
         ) {
             cmd.clip_active = self.clip_active();
         }

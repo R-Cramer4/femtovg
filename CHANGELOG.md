@@ -3,6 +3,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Added `Canvas::copy_render_target`: copies a rect of the current render
+  target, the screen included, into an image, where a draw of that rect
+  would land. Copy what's already drawn to filter it and draw it back, such
+  as the backdrop of a frosted-glass effect. On WGPU, copying from the
+  screen needs `COPY_SRC` usage on the output texture, which must be mip 0
+  of a single-layer texture. It returns `ErrorKind::UnsupportedOperation`
+  while a `begin_layer` capture is open.
 - Fixed the WGPU backend ignoring `ImageFlags::GENERATE_MIPMAPS`: an image
   created with it now gets its mip levels, filled after every upload the way
   the OpenGL backend's `glGenerateMipmap` fills them, and is sampled with
